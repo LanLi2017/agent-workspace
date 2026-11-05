@@ -435,14 +435,14 @@ export class Workspace {
     const project = this.project(args.projectId);
     if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
     if (project.host) this.requireOnHost(args.provider, project.host);
+    const baseBranch = args.baseBranch?.trim() || undefined;
+    if (baseBranch && !(args.isolate && project.isGitRepo && !project.host)) throw new Error('A branch can only be chosen for a task in its own worktree on this Mac.');
     const d = this.store.data;
     const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const taskId = `t-${randomUUID().slice(0, 8)}`;
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
-    const baseBranch = args.baseBranch?.trim() || undefined;
-    if (baseBranch && !(args.isolate && project.isGitRepo && !project.host)) throw new Error('A branch can only be chosen for a task in its own worktree on this Mac.');
     if (args.isolate && project.isGitRepo && project.host) {
       sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
     } else if (args.isolate && project.isGitRepo) {
