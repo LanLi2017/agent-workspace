@@ -1,6 +1,7 @@
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type {
   AttentionItem,
+  BranchList,
   DispatchResult,
   MemoryRecord,
   NativeSessionInfo,
@@ -29,6 +30,7 @@ interface Outputs {
   'transcript:get': TranscriptItem[];
   'project:pickDirectory': string | null;
   'project:add': Project;
+  'project:branches': BranchList | null;
   'ssh:hosts': Array<{ host: string; hostName?: string; user?: string }>;
   'ssh:setEnabled': void;
   'ssh:check': RemoteHostStatus;

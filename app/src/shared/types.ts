@@ -32,6 +32,17 @@ export interface WorktreeInfo {
   branch: string;
   baseRef: string;
   parentRepo: string;
+  /** False when the task works on a branch the user picked; that branch is never deleted. Unset (older tasks) = created for the task. */
+  ownsBranch?: boolean;
+  /** Branch checked out there at the end of the last turn, when it is no longer `branch`; null = detached HEAD. */
+  currentBranch?: string | null;
+}
+
+export interface BranchList {
+  /** Branch checked out in the project folder; null when detached. */
+  current: string | null;
+  /** Local branches, most recent commit first. `checkedOut` = in use by the project folder or a worktree. */
+  branches: { name: string; checkedOut: boolean }[];
 }
 
 export interface Task {

@@ -8,12 +8,15 @@ const id = z.string().min(1).max(200);
 /** An SSH alias from ~/.ssh/config (same rule as util/ssh HOST_RE). */
 const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
+/** A local branch name; git's own check-ref-format runs in main as well. */
+const branch = z.string().min(1).max(250).regex(/^[^-\s~^:?*[\\][^\s~^:?*[\\]*$/);
 
 export const ipcSchemas = {
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),
   'project:pickDirectory': z.object({}),
   'project:add': z.object({ rootPath: z.string().min(1).max(4096), name: z.string().max(200).optional(), host: host.optional() }),
+  'project:branches': z.object({ projectId: id }),
   'ssh:hosts': z.object({}),
   'ssh:setEnabled': z.object({ host, enabled: z.boolean() }),
   'ssh:check': z.object({ host }),
@@ -26,6 +29,8 @@ export const ipcSchemas = {
     name: z.string().max(100).optional(),
     instruction: text.optional(),
     isolate: z.boolean(),
+    baseBranch: branch.optional(),
+    useExistingBranch: z.boolean().optional(),
     mockScript: z.string().max(50).optional(),
   }),
   'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),

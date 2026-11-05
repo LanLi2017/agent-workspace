@@ -26,7 +26,7 @@ Both also work from the repo root.
 ## Isolation
 
 - App state: `app/.data` (override with `AMW_DATA_DIR`). Electron's own profile is also under it.
-- New tasks in a git repo get their own worktree under `app/.data/worktrees/…` on a branch `amw/<name>-<id>`. A worktree is removed only when it is clean and has no new commits.
+- New tasks in a git repo get their own worktree under `app/.data/worktrees/…` on a branch `amw/<name>-<id>`, started from the branch checked out in the project folder or from another local branch picked in **New task › Branch**. **Work on this branch itself** checks the picked branch out in the worktree instead (not possible for a branch another worktree already has); that branch is never deleted. The card shows the branch the worktree is on, updated after each turn if the agent switched. A worktree is removed only when it is clean and has no new commits.
 - Not touched: `~/.claude`, `~/.codex`, repo `CLAUDE.md` / `AGENTS.md`, global npm and Electron caches. Provider sessions are stored by the providers themselves, as usual.
 - SSH: connection-sharing sockets and the password-prompt helper live in `/tmp/amw-ssh-<uid>/`. Only when you click **Unlock key…** or **Check and trust…** does SSH itself add the key to your agent / Keychain or the host to `~/.ssh/known_hosts`; `~/.ssh/config` is only read.
 

@@ -5,6 +5,7 @@ import { basename, join, resolve, sep } from 'node:path';
 import type {
   AgentProvider,
   AttentionItem,
+  BranchList,
   CoordinatorEntry,
   DispatchResult,
   MemoryRecord,
@@ -35,6 +36,7 @@ import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
+import { branchLabel } from '../shared/branch';
 import { gitRoot, WorktreeService } from './worktree';
 import { run } from './util/exec';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -392,6 +394,25 @@ export class Workspace {
     return t;
   }
 
+  /** Local branches of a project, for choosing where a new task starts; null for a remote or non-git folder. */
+  async projectBranches(projectId: string): Promise<BranchList | null> {
+    const p = this.project(projectId);
+    if (p.host || !p.isGitRepo) return null;
+    return this.worktrees.branches(p.rootPath);
+  }
+
+  /** Notices a branch switch inside a task's worktree, so its card shows the branch it is really on. */
+  private async syncBranch(task: Task): Promise<void> {
+    const wt = task.worktree;
+    if (!wt || task.host) return;
+    const now = await this.worktrees.currentBranch(wt.path);
+    const next = now === wt.branch ? undefined : now;
+    if (next === wt.currentBranch) return;
+    if (next === undefined) delete wt.currentBranch;
+    else wt.currentBranch = next;
+    this.changed();
+  }
+
   private project(projectId: string): Project {
     const p = this.store.data.projects.find((x) => x.projectId === projectId);
     if (!p) throw new Error(`Unknown project ${projectId}`);
@@ -405,6 +426,10 @@ export class Workspace {
     name?: string;
     instruction?: string;
     isolate: boolean;
+    /** With `isolate`: the local branch the worktree starts from (default: the project folder's HEAD). */
+    baseBranch?: string;
+    /** With `baseBranch`: work on that branch itself instead of a new `amw/…` branch. */
+    useExistingBranch?: boolean;
     mockScript?: string;
   }): Promise<Task> {
     const project = this.project(args.projectId);
@@ -416,13 +441,20 @@ export class Workspace {
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
+    const baseBranch = args.baseBranch?.trim() || undefined;
+    if (baseBranch && !(args.isolate && project.isGitRepo && !project.host)) throw new Error('A branch can only be chosen for a task in its own worktree on this Mac.');
     if (args.isolate && project.isGitRepo && project.host) {
       sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
     } else if (args.isolate && project.isGitRepo) {
       try {
-        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`);
+        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`, {
+          from: baseBranch,
+          useExisting: !!args.useExistingBranch,
+        });
         cwd = worktree.path;
       } catch (error) {
+        // A branch the user asked for is never silently swapped for the project folder's.
+        if (baseBranch) throw error;
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
       }
     }
@@ -942,6 +974,7 @@ export class Workspace {
             it.streaming = false;
             for (const cb of this.transcriptListeners) cb(taskId, { ...it });
           }
+        void this.syncBranch(task).catch(() => {});
         if (event.status === 'failed') {
           // The model was busy: try the same turn again after a wait, unless the provider already did.
           const tried = this.retries.get(taskId)?.attempt ?? 1;
@@ -1403,6 +1436,8 @@ export class Workspace {
 
   async agentChanges(taskId: string): Promise<string> {
     const t = this.task(taskId);
+    await this.syncBranch(t).catch(() => {});
+    const onBranch = t.worktree ? branchLabel(t.worktree) : '';
     const dir = t.worktree?.path ?? t.cwd;
     const base = t.worktree?.baseRef ?? 'HEAD';
     const [stat, status, log] = await this.peek(t.host, dir, [
@@ -1411,9 +1446,9 @@ export class Workspace {
       ['git', 'log', '--oneline', '-20', `${base}..HEAD`],
     ]).catch((e: Error) => [`Could not read ${t.alias}'s folder: ${e.message}`]);
     const untracked = status?.split('\n').filter((l) => l.startsWith('??')).map((l) => l.slice(3)) ?? [];
-    if (!stat && !untracked.length && !log) return `${t.alias} has not changed any files${t.worktree ? ` on ${t.worktree.branch}` : ''}.`;
+    if (!stat && !untracked.length && !log) return `${t.alias} has not changed any files${t.worktree ? ` on ${onBranch}` : ''}.`;
     return [
-      `${t.alias} in ${dir}${t.worktree ? ` (branch ${t.worktree.branch})` : ' (shared folder: changes may include others\u2019)'}`,
+      `${t.alias} in ${dir}${t.worktree ? ` (branch ${onBranch})` : ' (shared folder: changes may include others\u2019)'}`,
       ...(stat ? [clip(stat, 2500)] : []),
       ...(untracked.length ? [`new files: ${untracked.slice(0, 30).join(', ')}`] : []),
       ...(log ? [`commits:\n${log}`] : []),
@@ -1466,7 +1501,7 @@ export class Workspace {
     return this.send(taskId, text, 'main', { interrupt });
   }
 
-  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
+  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string; baseBranch?: string }): Promise<Task> {
     return this.createTask({ ...args, name: args.role, isolate: true });
   }
 

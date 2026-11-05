@@ -21,7 +21,7 @@ export interface MainAgentHost {
   findAgent(name: string): Task | undefined;
   transcriptText(taskId: string, limit: number): string;
   sendFromMain(taskId: string, text: string, interrupt: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
-  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task>;
+  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string; baseBranch?: string }): Promise<Task>;
   stopFromMain(taskId: string): Promise<void>;
   saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void;
   availableProviders(): AgentProvider[];
@@ -126,6 +126,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         instruction: z.string().min(1).describe('The first instruction for the new agent.'),
         provider: z.enum(['claude', 'codex']).optional().describe('Defaults to the first available.'),
         role: z.string().optional().describe('Optional one-word role, e.g. "Database".'),
+        base_branch: z.string().optional().describe('Local branch the agent starts from, when the user names one (project_overview shows the current branch). Defaults to the branch checked out in the project folder.'),
       }),
       run: async (a) => {
         const projects = host.listProjects();
@@ -135,7 +136,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         const providers = host.availableProviders();
         const provider = (a.provider as AgentProvider | undefined) ?? providers[0];
         if (!provider || !providers.includes(provider)) return `Provider ${String(a.provider)} is not available here. Available: ${providers.join(', ') || 'none'}.`;
-        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), role: a.role ? String(a.role) : undefined });
+        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), role: a.role ? String(a.role) : undefined, baseBranch: a.base_branch ? String(a.base_branch) : undefined });
         return `Started ${t.alias} (${provider}) on ${p.name}: "${t.title}".`;
       },
     },

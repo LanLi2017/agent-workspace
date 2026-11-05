@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { branchLabel } from '../../shared/branch';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -47,7 +48,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               </span>
               {task.worktree ? (
                 <span title={task.worktree.path}>
-                  <Icon name="branch" size={12} /> {task.worktree.branch}
+                  <Icon name="branch" size={12} /> {branchLabel(task.worktree)}
                 </span>
               ) : null}
               {session?.nativeSessionId ? (

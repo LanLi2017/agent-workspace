@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { AgentProvider, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
+import type { AgentProvider, BranchList, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
@@ -113,6 +113,10 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   const [title, setTitle] = useState('');
   const [instruction, setInstruction] = useState('');
   const [isolate, setIsolate] = useState(true);
+  const [branches, setBranches] = useState<BranchList | null>(null);
+  /** '' = the branch checked out in the project folder. */
+  const [baseBranch, setBaseBranch] = useState('');
+  const [useExisting, setUseExisting] = useState(false);
   const [mockScript, setMockScript] = useState('ask:Should I keep backwards compatibility?');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -122,6 +126,23 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   const capOf = (p: AgentProvider) => (project?.host ? remote?.capabilities.find((c) => c.provider === p) : snapshot.capabilities.find((c) => c.provider === p));
   const usable = (p: AgentProvider) => !!capOf(p)?.available && (!project?.host || remote?.ssh === 'ok');
   const cap = capOf(provider);
+  const canIsolate = !!project?.isGitRepo && !project.host;
+  useEffect(() => {
+    setBranches(null);
+    setBaseBranch('');
+    setUseExisting(false);
+    if (!projectId || !canIsolate) return;
+    let stale = false;
+    call('project:branches', { projectId })
+      .then((b) => !stale && setBranches(b))
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [projectId, canIsolate]);
+  const picked = branches?.branches.find((b) => b.name === baseBranch);
+  // A branch checked out elsewhere (the project folder or another task) cannot be checked out again.
+  const existingBlocked = !picked || picked.checkedOut;
   useEffect(() => {
     if (!usable(provider)) {
       const next = providers.find(usable);
@@ -141,6 +162,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
         name: name.trim() || undefined,
         instruction: instruction.trim() || undefined,
         isolate: isolate && !project?.host,
+        ...(isolate && canIsolate && baseBranch ? { baseBranch, useExistingBranch: useExisting && !existingBlocked } : {}),
         mockScript: provider === 'mock' ? mockScript : undefined,
       });
       onCreated(t.taskId);
@@ -216,6 +238,36 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
             ? t('(not a git repo — will share the folder)')
             : t('(isolates edits from other tasks; not a security sandbox)')}
       </label>
+      {isolate && canIsolate && branches?.branches.length ? (
+        <div className="field">
+          <label>{t('Branch')}</label>
+          <div className="row">
+            <select className="input" value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} data-testid="base-branch">
+              <option value="">{branches.current ? t('Current branch ({name})', { name: branches.current }) : t('Current HEAD (detached)')}</option>
+              {/* Free branches first; ones another worktree has (e.g. other agents') can still be started from. */}
+              {[...branches.branches.filter((b) => !b.checkedOut), ...branches.branches.filter((b) => b.checkedOut)]
+                .filter((b) => b.name !== branches.current)
+                .map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.checkedOut ? t('{name} (in use)', { name: b.name }) : b.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={useExisting && !existingBlocked} disabled={existingBlocked} onChange={(e) => setUseExisting(e.target.checked)} data-testid="use-existing-branch" />
+            {t('Work on this branch itself')}{' '}
+            {!baseBranch
+              ? t('(pick a branch other than the current one)')
+              : picked?.checkedOut
+                ? t('(checked out in another worktree — will start a new branch from it)')
+                : t('(no new amw/ branch; commits land on it directly)')}
+          </label>
+          {!(useExisting && !existingBlocked) ? (
+            <div className="muted small">{t('The agent gets a new amw/ branch starting from {name}.', { name: baseBranch || branches.current || 'HEAD' })}</div>
+          ) : null}
+        </div>
+      ) : null}
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>

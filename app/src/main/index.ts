@@ -89,6 +89,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
     return r.canceled ? null : (r.filePaths[0] ?? null);
   },
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
+  'project:branches': (i: { projectId: string }) => workspace.projectBranches(i.projectId),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
   'ssh:check': (i: { host: string }) => workspace.checkHost(i.host),

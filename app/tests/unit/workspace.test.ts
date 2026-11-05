@@ -236,6 +236,61 @@ describe('worktrees', () => {
     expect(existsSync(b.cwd)).toBe(false);
   });
 
+  it('a task can start from another branch, or work on an existing branch itself', async () => {
+    const ws = open();
+    const root = repo();
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' }).trim();
+    git(root, 'switch', '-qc', 'feature');
+    writeFileSync(join(root, 'feature.txt'), 'f\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '-qm', 'feature work');
+    git(root, 'switch', '-q', '-');
+    git(root, 'branch', 'spare');
+    const p = await ws.addProject(root);
+
+    const list = (await ws.projectBranches(p.projectId))!;
+    const current = git(root, 'branch', '--show-current');
+    expect(list.current).toBe(current);
+    expect(list.branches.map((b) => b.name).sort()).toEqual([current, 'feature', 'spare'].sort());
+    expect(list.branches.find((b) => b.name === current)?.checkedOut).toBe(true);
+    expect(list.branches.find((b) => b.name === 'feature')?.checkedOut).toBe(false);
+
+    // A new amw/ branch from feature: the project folder stays on its own branch.
+    const fromFeature = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'From feature', isolate: true, baseBranch: 'feature' });
+    expect(fromFeature.worktree?.branch).toMatch(/^amw\//);
+    expect(existsSync(join(fromFeature.cwd, 'feature.txt'))).toBe(true);
+    expect(existsSync(join(root, 'feature.txt'))).toBe(false);
+
+    // Feature itself in a worktree; removing the task keeps the user's branch.
+    const onFeature = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'On feature', isolate: true, baseBranch: 'feature', useExistingBranch: true });
+    expect(onFeature.worktree).toMatchObject({ branch: 'feature', ownsBranch: false });
+    expect(git(onFeature.cwd, 'branch', '--show-current')).toBe('feature');
+    expect((await ws.projectBranches(p.projectId))!.branches.find((b) => b.name === 'feature')?.checkedOut).toBe(true);
+    expect(await ws.remove(onFeature.taskId)).toMatch(/deleted/);
+    expect(git(root, 'branch', '--list', 'feature')).toContain('feature');
+
+    // The checked-out branch cannot be checked out twice, and a chosen branch never falls back to the shared folder.
+    await expect(ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Twice', isolate: true, baseBranch: current, useExistingBranch: true })).rejects.toThrow(/worktree add failed/);
+    await expect(ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Nope', isolate: true, baseBranch: 'no-such' })).rejects.toThrow(/no local branch/);
+    await expect(ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Bad', isolate: true, baseBranch: '--force' })).rejects.toThrow(/not a valid branch name/);
+    await expect(ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Shared', isolate: false, baseBranch: 'feature' })).rejects.toThrow(/own worktree/);
+    expect(ws.snapshot().tasks.map((t) => t.title)).toEqual(['From feature']);
+  });
+
+  it('shows the branch a worktree switched to', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Switcher', isolate: true });
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    execFileSync('git', ['switch', '-qc', 'renamed-work'], { cwd: a.cwd });
+    expect(await tools.agent_changes.run({ agent: a.alias })).toMatch(/on renamed-work\./);
+    expect(ws.snapshot().tasks[0].worktree).toMatchObject({ branch: a.worktree!.branch, currentBranch: 'renamed-work' });
+    execFileSync('git', ['switch', '-q', a.worktree!.branch], { cwd: a.cwd });
+    await tools.agent_changes.run({ agent: a.alias });
+    expect(ws.snapshot().tasks[0].worktree?.currentBranch).toBeUndefined();
+  });
+
   it('warns when tasks share a writable directory', async () => {
     const ws = open();
     const p = await ws.addProject(repo());

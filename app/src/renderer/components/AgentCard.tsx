@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { branchLabel } from '../../shared/branch';
 import type { AttentionItem, Project, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
@@ -87,7 +88,7 @@ export function AgentCard({
         </span>
         {task.worktree ? (
           <span className="truncate" title={task.worktree.path}>
-            <Icon name="branch" size={12} /> {task.worktree.branch}
+            <Icon name="branch" size={12} /> {branchLabel(task.worktree)}
           </span>
         ) : null}
         <span className="tile-updated">{timeAgo(task.updatedAt, now)}</span>
